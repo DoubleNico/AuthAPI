@@ -15,7 +15,7 @@ const authUtils = new AuthUtils(
   redis,
   'your-access-token-secret',
   'your-refresh-token-secret',
-  '15min',
+  '15m',
   '30d',
   false,
   'yourdomain.com'
@@ -32,8 +32,10 @@ app.post('/login', async (req: Request, res: Response): Promise<void> => {
 
   if (username === 'test' && password === 'password') {
     const userId = '123'
+    const oldRefreshToken = req.cookies['rid']
+
     const responseAdapter = new ExpressResponseAdapter(res)
-    await authUtils.sendAuthCookies(responseAdapter, userId)
+    await authUtils.sendAuthCookies(responseAdapter, userId, oldRefreshToken)
     res.json({ message: 'Login successful' })
     return
   }
@@ -44,8 +46,21 @@ app.post('/login', async (req: Request, res: Response): Promise<void> => {
 app.get(
   '/protected',
   authMiddleware(authUtils),
-  (req: Request, res: Response) => {
-    res.json({ message: `Welcome user ${req.userId}` })
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.userId
+      if (!userId) {
+        res.status(401).json({ message: 'Unauthorized' })
+        return
+      }
+
+      res.json({
+        message: `Welcome to the protected resource, user ${userId}`,
+      })
+    } catch (err) {
+      console.error('Error accessing protected resource:', err)
+      res.status(500).json({ message: 'Internal server error' })
+    }
   }
 )
 

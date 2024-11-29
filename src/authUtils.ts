@@ -57,8 +57,22 @@ export class AuthUtils {
 
   public async sendAuthCookies(
     res: GeneralResponse,
-    userId: string
+    userId: string,
+    oldRefreshToken?: string
   ): Promise<void> {
+    if (oldRefreshToken) {
+      try {
+        const oldData = jwt.verify(
+          oldRefreshToken,
+          this.refreshTokenSecret
+        ) as RefreshTokenData
+        await this.redis.del(oldData.refreshTokenId)
+        console.log(`Deleted old refresh token: ${oldData.refreshTokenId}`)
+      } catch (error) {
+        console.error('Failed to delete old refresh token:', error)
+      }
+    }
+
     const refreshTokenId = `${userId}-${Date.now()}`
     const { accessToken, refreshToken } = this.createAuthTokens(
       userId,
@@ -121,14 +135,9 @@ export class AuthUtils {
       const userId = await this.redis.get(data.refreshTokenId)
       if (!userId) throw new TRPCError({ code: 'UNAUTHORIZED' })
 
-      const newRefreshTokenId = `${userId}-${Date.now()}`
-      await this.redis.set(
-        newRefreshTokenId,
-        userId,
-        this.parseExpiration(this.refreshTokenExpiresIn)
-      )
       await this.redis.del(data.refreshTokenId)
 
+      const newRefreshTokenId = `${userId}-${Date.now()}`
       const newRefreshToken = jwt.sign(
         { userId, refreshTokenId: newRefreshTokenId },
         this.refreshTokenSecret,
@@ -138,6 +147,12 @@ export class AuthUtils {
       const newAccessToken = jwt.sign({ userId }, this.accessTokenSecret, {
         expiresIn: this.accessTokenExpiresIn,
       })
+
+      await this.redis.set(
+        newRefreshTokenId,
+        userId,
+        this.parseExpiration(this.refreshTokenExpiresIn)
+      )
 
       return { userId, newAccessToken, newRefreshToken }
     }
