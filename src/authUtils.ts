@@ -18,7 +18,7 @@ export class AuthUtils {
     redis: RedisClient,
     accessTokenSecret: string,
     refreshTokenSecret: string,
-    accessTokenExpiresIn: string = '15min',
+    accessTokenExpiresIn: string = '15m',
     refreshTokenExpiresIn: string = '30d',
     isProduction: boolean = false,
     domain: string = ''
@@ -38,23 +38,63 @@ export class AuthUtils {
     }
   }
 
-  private createAuthTokens(
-    userId: string,
-    refreshTokenId: string
-  ): { refreshToken: string; accessToken: string } {
-    const refreshToken = jwt.sign(
-      { userId, refreshTokenId },
-      this.refreshTokenSecret,
-      { expiresIn: this.refreshTokenExpiresIn }
-    )
-
-    const accessToken = jwt.sign({ userId }, this.accessTokenSecret, {
-      expiresIn: this.accessTokenExpiresIn,
-    })
-
-    return { refreshToken, accessToken }
+  /**
+   * Returns the Redis client instance.
+   */
+  public getRedis(): RedisClient {
+    return this.redis
   }
 
+  /**
+   * Returns the access token secret.
+   */
+  public getAccessTokenSecret(): string {
+    return this.accessTokenSecret
+  }
+
+  /**
+   * Returns the refresh token secret.
+   */
+  public getRefreshTokenSecret(): string {
+    return this.refreshTokenSecret
+  }
+
+  /**
+   * Returns the access token expiration time as a string.
+   */
+  public getAccessTokenExpiresIn(): string {
+    return this.accessTokenExpiresIn
+  }
+
+  /**
+   * Returns the refresh token expiration time as a string.
+   */
+  public getRefreshTokenExpiresIn(): string {
+    return this.refreshTokenExpiresIn
+  }
+
+  /**
+   * Returns the cookie options.
+   */
+  public getCookieOptions(): CookieOptions {
+    return this.cookieOptions
+  }
+
+  /**
+   * Parses the expiration time string and returns the equivalent time in milliseconds.
+   * @param expiresIn - The expiration time string (e.g., '15m', '30d').
+   * @returns The expiration time in milliseconds.
+   */
+  public getExpirationInMilliseconds(expiresIn: string): number {
+    return this.parseExpiration(expiresIn) * 1000
+  }
+
+  /**
+   * Sends authentication cookies to the client.
+   * @param res - The GeneralResponse object.
+   * @param userId - The user ID.
+   * @param oldRefreshToken - The old refresh token (optional).
+   */
   public async sendAuthCookies(
     res: GeneralResponse,
     userId: string,
@@ -68,8 +108,8 @@ export class AuthUtils {
         ) as RefreshTokenData
         await this.redis.del(oldData.refreshTokenId)
         console.log(`Deleted old refresh token: ${oldData.refreshTokenId}`)
-      } catch (error) {
-        console.error('Failed to delete old refresh token:', error)
+      } catch {
+        console.error('Failed to delete old refresh token:', oldRefreshToken)
       }
     }
 
@@ -95,6 +135,11 @@ export class AuthUtils {
     })
   }
 
+  /**
+   * Clears authentication cookies from the client.
+   * @param res - The GeneralResponse object.
+   * @param refreshToken - The refresh token.
+   */
   public async clearAuthCookies(
     res: GeneralResponse,
     refreshToken: string
@@ -104,6 +149,7 @@ export class AuthUtils {
         refreshToken,
         this.refreshTokenSecret
       ) as RefreshTokenData
+      console.log(`Deleting refresh token: ${data.refreshTokenId}`)
       await this.redis.del(data.refreshTokenId)
     } catch (error) {
       console.error('Failed to clear auth cookies:', error)
@@ -112,14 +158,24 @@ export class AuthUtils {
     res.clearCookie('rid', this.cookieOptions)
   }
 
+  /**
+   * Checks the validity of the access token and refresh token.
+   * @param accessToken - The access token.
+   * @param refreshToken - The refresh token.
+   * @returns An object containing the userId, newAccessToken, and newRefreshToken if the tokens are valid.
+   */
   public async checkTokens(accessToken: string, refreshToken: string) {
     try {
       const data = jwt.verify(
         accessToken,
         this.accessTokenSecret
       ) as AccessTokenData
-      return { userId: data.userId }
+
+      console.log('Access token is valid for user:', data.userId)
+      return { userId: data.userId, newAccessToken: null }
     } catch {
+      console.error('Access token verification failed:', accessToken)
+
       if (!refreshToken) throw new TRPCError({ code: 'UNAUTHORIZED' })
 
       let data: RefreshTokenData
@@ -129,33 +185,47 @@ export class AuthUtils {
           this.refreshTokenSecret
         ) as RefreshTokenData
       } catch {
+        console.error('Refresh token verification failed:', refreshToken)
         throw new TRPCError({ code: 'UNAUTHORIZED' })
       }
 
       const userId = await this.redis.get(data.refreshTokenId)
-      if (!userId) throw new TRPCError({ code: 'UNAUTHORIZED' })
-
-      await this.redis.del(data.refreshTokenId)
-
-      const newRefreshTokenId = `${userId}-${Date.now()}`
-      const newRefreshToken = jwt.sign(
-        { userId, refreshTokenId: newRefreshTokenId },
-        this.refreshTokenSecret,
-        { expiresIn: this.refreshTokenExpiresIn }
-      )
+      if (!userId) {
+        console.error('Refresh token not found in Redis:', data.refreshTokenId)
+        throw new TRPCError({ code: 'UNAUTHORIZED' })
+      }
 
       const newAccessToken = jwt.sign({ userId }, this.accessTokenSecret, {
         expiresIn: this.accessTokenExpiresIn,
       })
 
-      await this.redis.set(
-        newRefreshTokenId,
-        userId,
-        this.parseExpiration(this.refreshTokenExpiresIn)
-      )
+      console.log('Generated a new access token for user:', userId)
 
-      return { userId, newAccessToken, newRefreshToken }
+      return { userId, newAccessToken }
     }
+  }
+
+  /**
+   * Creates and returns a new access token and refresh token.
+   * @param userId - The user ID.
+   * @param refreshTokenId - The refresh token ID.
+   * @returns An object containing the refreshToken and accessToken.
+   */
+  private createAuthTokens(
+    userId: string,
+    refreshTokenId: string
+  ): { refreshToken: string; accessToken: string } {
+    const refreshToken = jwt.sign(
+      { userId, refreshTokenId },
+      this.refreshTokenSecret,
+      { expiresIn: this.refreshTokenExpiresIn }
+    )
+
+    const accessToken = jwt.sign({ userId }, this.accessTokenSecret, {
+      expiresIn: this.accessTokenExpiresIn,
+    })
+
+    return { refreshToken, accessToken }
   }
 
   private parseExpiration(expiresIn: string): number {

@@ -57,8 +57,7 @@ app.get(
       res.json({
         message: `Welcome to the protected resource, user ${userId}`,
       })
-    } catch (err) {
-      console.error('Error accessing protected resource:', err)
+    } catch {
       res.status(500).json({ message: 'Internal server error' })
     }
   }
@@ -76,12 +75,8 @@ app.post('/logout', async (req: Request, res: Response): Promise<void> => {
     const responseAdapter = new ExpressResponseAdapter(res)
     await authUtils.clearAuthCookies(responseAdapter, refreshToken)
 
-    responseAdapter.clearCookie('id', { httpOnly: true })
-    responseAdapter.clearCookie('rid', { httpOnly: true })
-
     res.json({ message: 'Logged out successfully' })
-  } catch (err) {
-    console.error('Error during logout:', err)
+  } catch {
     res.status(500).json({ message: 'Failed to log out' })
   }
 })

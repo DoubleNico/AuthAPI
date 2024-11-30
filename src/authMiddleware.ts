@@ -1,5 +1,5 @@
 import { Request, NextFunction, RequestHandler } from 'express'
-import { AuthUtils } from './authUtils'
+import { AuthUtils } from './authUtils.js'
 import { ExpressResponseAdapter } from './responses/ExpressResponseAdapter.js'
 
 declare module 'express-serve-static-core' {
@@ -20,13 +20,23 @@ export const authMiddleware = (authUtils: AuthUtils): RequestHandler => {
     const responseAdapter = new ExpressResponseAdapter(res)
 
     try {
-      const { userId } = await authUtils.checkTokens(accessToken, refreshToken)
+      const { userId, newAccessToken } = await authUtils.checkTokens(
+        accessToken,
+        refreshToken
+      )
       req.userId = userId
+
+      if (newAccessToken) {
+        responseAdapter.setCookie('id', newAccessToken, {
+          ...authUtils.getCookieOptions(),
+          maxAge: authUtils.getExpirationInMilliseconds(
+            authUtils.getAccessTokenExpiresIn()
+          ),
+        })
+      }
+
       next()
     } catch {
-      responseAdapter.clearCookie('id', {})
-      responseAdapter.clearCookie('rid', {})
-      responseAdapter.setCookie('error', 'Unauthorized', { maxAge: 0 }) // Also an exemple
       res.status(401).json({ message: 'Unauthorized' })
     }
   }
