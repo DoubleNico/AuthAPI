@@ -228,6 +228,11 @@ export class AuthUtils {
     return { refreshToken, accessToken }
   }
 
+  /**
+   * Parses the expiration time string and returns the equivalent time in seconds.
+   * @param expiresIn - The expiration time string (e.g., '15m', '30d').
+   * @returns The expiration time in seconds.
+   */
   private parseExpiration(expiresIn: string): number {
     const match = expiresIn.match(/^(\d+)([a-z]+)$/i)
     if (!match) throw new Error(`Invalid expiresIn format: ${expiresIn}`)
